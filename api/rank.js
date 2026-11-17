@@ -1,18 +1,5 @@
 
 const sharp = require("sharp");
-const { Resvg } = require("@resvg/resvg-js");
-const fs = require("fs");
-const path = require("path");
-
-const fontDir = path.join(process.cwd(), "fonts");
-
-const arabicFont = fs.readFileSync(
-  path.join(fontDir, "NotoSansArabic-Regular.ttf")
-);
-
-const englishFont = fs.readFileSync(
-  path.join(fontDir, "DejaVuSans.ttf")
-);
 
 function escapeXML(value) {
   return String(value)
@@ -23,24 +10,25 @@ function escapeXML(value) {
     .replace(/'/g, "&apos;");
 }
 
-function number(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function limit(value, max = 28) {
+function limit(value, max = 25) {
   return Array.from(String(value)).slice(0, max).join("");
 }
 
-function text(value, x, y, size = 26, color = "#fff") {
-  const content = escapeXML(limit(value, 35));
-  return `
-    <text x="${x}" y="${y}"
-      font-family="Noto Sans Arabic, DejaVu Sans"
-      font-size="${size}"
-      fill="${color}"
-      direction="auto">${content}</text>
-  `;
+function safeNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.floor(n)) : fallback;
+}
+
+function text(value, x, y, size = 25, color = "#FFFFFF", anchor = "start") {
+  return `<text
+    x="${x}"
+    y="${y}"
+    fill="${color}"
+    font-size="${size}"
+    font-family="DejaVu Sans, Arial, sans-serif"
+    font-weight="bold"
+    text-anchor="${anchor}"
+  >${escapeXML(value)}</text>`;
 }
 
 module.exports = async (req, res) => {
@@ -50,14 +38,14 @@ module.exports = async (req, res) => {
       return res.status(405).send("Method not allowed");
     }
 
-    const q = req.query;
+    const q = req.query || {};
 
     const name = limit(q.name || "DartelX User");
     const username = limit(q.username || "@user");
-    const level = Math.max(0, Math.floor(number(q.level, 1)));
-    const rank = Math.max(0, Math.floor(number(q.rank, 1)));
-    const xp = Math.max(0, Math.floor(number(q.xp, 0)));
-    const maxxp = Math.max(1, Math.floor(number(q.maxxp, 100)));
+    const level = safeNumber(q.level, 1);
+    const rank = safeNumber(q.rank, 1);
+    const xp = safeNumber(q.xp, 0);
+    const maxxp = Math.max(1, safeNumber(q.maxxp, 100));
 
     const progress = Math.min(100, (xp / maxxp) * 100);
     const barWidth = 540 * progress / 100;
@@ -76,10 +64,13 @@ module.exports = async (req, res) => {
           <stop offset="0%" stop-color="#A020F0"/>
           <stop offset="100%" stop-color="#E49AFF"/>
         </linearGradient>
+
+        <clipPath id="progressClip">
+          <rect x="260" y="208" width="540" height="24" rx="12"/>
+        </clipPath>
       </defs>
 
-      <rect width="1000" height="300"
-        rx="30" fill="url(#bg)"/>
+      <rect width="1000" height="300" rx="30" fill="url(#bg)"/>
 
       <rect x="2" y="2" width="996" height="296"
         rx="28" fill="none"
@@ -89,8 +80,8 @@ module.exports = async (req, res) => {
         fill="#25132F"
         stroke="#A020F0" stroke-width="9"/>
 
-      ${text("LVL", 107, 135, 22, "#CFA5F4")}
-      ${text(level, 109, 176, 38)}
+      ${text("LVL", 135, 135, 22, "#CFA5F4", "middle")}
+      ${text(level, 135, 176, 38, "#FFFFFF", "middle")}
 
       ${text(name, 260, 85, 35)}
       ${text(username, 260, 130, 23, "#B9A8C5")}
@@ -100,8 +91,10 @@ module.exports = async (req, res) => {
       <rect x="260" y="208" width="540" height="24"
         rx="12" fill="#33243D"/>
 
-      <rect x="260" y="208" width="${barWidth}" height="24"
-        rx="12" fill="url(#xp)"/>
+      <g clip-path="url(#progressClip)">
+        <rect x="260" y="208" width="${barWidth}" height="24"
+          fill="url(#xp)"/>
+      </g>
 
       ${text(xp + " / " + maxxp + " XP", 260, 266, 20, "#D7C4E1")}
 
@@ -110,26 +103,18 @@ module.exports = async (req, res) => {
 
     </svg>`;
 
-    const renderer = new Resvg(svg, {
-      font: {
-        fontBuffers: [arabicFont, englishFont],
-        loadSystemFonts: false,
-        defaultFontFamily: "Noto Sans Arabic"
-      }
-    });
-
-    const rendered = renderer.render().asPng();
-
-    const png = await sharp(rendered)
+    const png = await sharp(Buffer.from(svg))
       .png()
       .toBuffer();
 
     res.setHeader("Content-Type", "image/png");
     res.setHeader("Cache-Control", "public, max-age=60");
+
     return res.status(200).send(png);
 
   } catch (error) {
     console.error("Rank API Error:", error);
+
     return res.status(500).json({
       error: "Rank card generation failed",
       message: error.message
